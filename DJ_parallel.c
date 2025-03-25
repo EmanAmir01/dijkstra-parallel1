@@ -6,66 +6,40 @@
 
 #define INF INT_MAX
 
-void dijkstra_parallel(int **graph, int V, int src, int num_threads, int chunk_size) {
-    int *dist = (int *)malloc(V * sizeof(int));
-    bool *visited = (bool *)malloc(V * sizeof(bool));
-
+void dijkstra_parallel(int **graph, int V, int src, int num_threads, int chunk_size, int *dist, bool *visited) {
+    // Initialize distances and visited array
     for (int i = 0; i < V; i++) {
         dist[i] = INF;
         visited[i] = false;
     }
     dist[src] = 0;
 
-    omp_set_num_threads(num_threads); // Set the number of threads
+    omp_set_num_threads(num_threads); // Set OpenMP threads
 
     for (int count = 0; count < V - 1; count++) {
         int min = INF, u = -1;
 
-        // Parallel minimum distance selection with thread logging
-        #pragma omp parallel
-        {
-            int local_min = INF, local_u = -1;
-            int thread_id = omp_get_thread_num();
-
-            #pragma omp for schedule(dynamic, chunk_size) nowait
-            for (int v = 0; v < V; v++) {
-                if (!visited[v] && dist[v] < local_min) {
-                    local_min = dist[v];
-                    local_u = v;
-                }
-            }
-
-            #pragma omp critical
-            {
-                if (local_min < min) {
-                    min = local_min;
-                    u = local_u;
-                    printf("Thread %d selected node %d with min distance %d\n", thread_id, u, min);
-                }
+        // Parallel selection of the minimum distance node using reduction
+        #pragma omp parallel for reduction(min: min) reduction(||: u) schedule(dynamic, chunk_size)
+        for (int v = 0; v < V; v++) {
+            if (!visited[v] && dist[v] < min) {
+                min = dist[v];
+                u = v;
             }
         }
 
         if (u == -1) break;
         visited[u] = true;
 
-        // Parallel distance update with thread logging
+        // Parallel update of distances
         #pragma omp parallel for schedule(dynamic, chunk_size)
         for (int v = 0; v < V; v++) {
-            int thread_id = omp_get_thread_num();
             if (!visited[v] && graph[u][v] && dist[u] != INF 
                 && dist[u] + graph[u][v] < dist[v]) {
-                printf("Thread %d updating distance of node %d\n", thread_id, v);
                 dist[v] = dist[u] + graph[u][v];
             }
         }
     }
-
-    printf("\nVertex \t Distance from Source %d\n", src);
-    for (int i = 0; i < V; i++)
-        printf("%d \t\t %d\n", i, dist[i]);
-
-    free(dist);
-    free(visited);
 }
 
 int main() {
@@ -94,13 +68,35 @@ int main() {
     printf("Enter the chunk size: ");
     scanf("%d", &chunk_size);
 
-    double start_time = omp_get_wtime();
-    dijkstra_parallel(graph, V, 0, num_threads, chunk_size);
-    double end_time = omp_get_wtime();
+    // Allocate memory for dist and visited arrays outside the loop
+    int *dist = (int *)malloc(V * sizeof(int));
+    bool *visited = (bool *)malloc(V * sizeof(bool));
 
-    printf("\nExecution Time: %.3f seconds with %d threads and chunk size %d\n", 
-           (end_time - start_time), num_threads, chunk_size);
+    int iterations = 10;
+    double total_time = 0.0;
 
+    for (int i = 0; i < iterations; i++) {
+        double start_time = omp_get_wtime();
+
+        dijkstra_parallel(graph, V, 0, num_threads, chunk_size, dist, visited);
+
+        double end_time = omp_get_wtime();
+        double time_taken = end_time - start_time;
+        total_time += time_taken;
+
+        printf("Iteration %d Execution Time: %.6f seconds\n", i + 1, time_taken);
+    }
+
+    // Print final shortest distances
+    printf("\nVertex \t Distance from Source 0\n");
+    for (int i = 0; i < V; i++)
+        printf("%d \t\t %d\n", i, dist[i]);
+
+    printf("\nAverage Execution Time over %d runs: %.6f seconds\n", iterations, total_time / iterations);
+
+    // Free allocated memory
+    free(dist);
+    free(visited);
     for (int i = 0; i < V; i++)
         free(graph[i]);
     free(graph);

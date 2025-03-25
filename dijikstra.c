@@ -2,105 +2,107 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <stdbool.h>
-#include <omp.h>
+#include <sys/time.h> // For high-precision time measurement
 
 #define INF INT_MAX
 
-void dijkstra_parallel(int **graph, int V, int src, int num_threads) {
+// Standard Dijkstra's Algorithm Implementation
+void dijkstra(int **graph, int V, int src) {
     int *dist = (int *)malloc(V * sizeof(int));
     bool *visited = (bool *)malloc(V * sizeof(bool));
 
+    // Initialize distances and visited array
     for (int i = 0; i < V; i++) {
         dist[i] = INF;
         visited[i] = false;
     }
-    dist[src] = 0;
 
-    omp_set_num_threads(num_threads); // Set the number of threads
+    dist[src] = 0; // Distance to source is always 0
 
     for (int count = 0; count < V - 1; count++) {
+        // Find the vertex with the minimum distance
         int min = INF, u = -1;
 
-        // Parallel minimum distance selection with static scheduling
-        #pragma omp parallel
-        {
-            int local_min = INF, local_u = -1;
-            int thread_id = omp_get_thread_num();
-
-            #pragma omp for schedule(static) nowait
-            for (int v = 0; v < V; v++) {
-                if (!visited[v] && dist[v] < local_min) {
-                    local_min = dist[v];
-                    local_u = v;
-                }
-            }
-
-            #pragma omp critical
-            {
-                if (local_min < min) {
-                    min = local_min;
-                    u = local_u;
-                    printf("Thread %d selected node %d with min distance %d\n", thread_id, u, min);
-                }
+        for (int v = 0; v < V; v++) {
+            if (!visited[v] && dist[v] < min) {
+                min = dist[v];
+                u = v;
             }
         }
 
-        if (u == -1) break;
+        if (u == -1) break; // No more reachable nodes
         visited[u] = true;
 
-        // Parallel distance update with static scheduling
-        #pragma omp parallel for schedule(static)
+        // Update the distances to adjacent vertices
         for (int v = 0; v < V; v++) {
-            int thread_id = omp_get_thread_num();
-            if (!visited[v] && graph[u][v] && dist[u] != INF 
-                && dist[u] + graph[u][v] < dist[v]) {
-                printf("Thread %d updating distance of node %d\n", thread_id, v);
+            if (!visited[v] && graph[u][v] && dist[u] != INF && dist[u] + graph[u][v] < dist[v]) {
                 dist[v] = dist[u] + graph[u][v];
             }
         }
     }
 
-    printf("\nVertex \t Distance from Source %d\n", src);
+    // Print the shortest distances from source
+    printf("Vertex\tDistance from Source %d\n", src);
     for (int i = 0; i < V; i++)
-        printf("%d \t\t %d\n", i, dist[i]);
+        printf("%d\t%d\n", i, dist[i]);
 
     free(dist);
     free(visited);
 }
 
+// Function to get time in milliseconds
+double get_time_in_milliseconds() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000.0) + (tv.tv_usec / 1000.0); // Convert to milliseconds
+}
+
 int main() {
-    int V = 5;
+    int V, num_threads, chunk_size;
+
+    // User input for dynamic values
+    printf("Enter number of vertices: ");
+    scanf("%d", &V);
+
+    printf("Enter number of threads: ");
+    scanf("%d", &num_threads);
+
+    printf("Enter chunk size: ");
+    scanf("%d", &chunk_size);
+
+    // Dynamically allocate graph
     int **graph = (int **)malloc(V * sizeof(int *));
     for (int i = 0; i < V; i++)
         graph[i] = (int *)malloc(V * sizeof(int));
 
-    int adjacencyMatrix[5][5] = {
-        {0, 10, 0, 30, 100},
-        {10, 0, 50, 0, 0},
-        {0, 50, 0, 20, 10},
-        {30, 0, 20, 0, 60},
-        {100, 0, 10, 60, 0}
-    };
+    // Generating a random adjacency matrix for testing (weighted graph)
+    printf("\nGenerated Adjacency Matrix:\n");
+    for (int i = 0; i < V; i++) {
+        for (int j = 0; j < V; j++) {
+            if (i == j) {
+                graph[i][j] = 0; // No self-loops
+            } else {
+                graph[i][j] = (rand() % 100) + 1; // Random weight (1-100)
+                graph[j][i] = graph[i][j]; // Symmetric for undirected graph
+            }
+            printf("%3d ", graph[i][j]);
+        }
+        printf("\n");
+    }
 
-    for (int i = 0; i < V; i++)
-        for (int j = 0; j < V; j++)
-            graph[i][j] = adjacencyMatrix[i][j];
+    double start = get_time_in_milliseconds();
+    dijkstra(graph, V, 0);
+    double end = get_time_in_milliseconds();
 
-    int num_threads;
+    printf("\nExecution Time: %.3f ms\n", end - start);
 
-    printf("Enter the number of threads: ");
-    scanf("%d", &num_threads);
-
-    double start_time = omp_get_wtime();
-    dijkstra_parallel(graph, V, 0, num_threads);
-    double end_time = omp_get_wtime();
-
-    printf("\nExecution Time: %.3f seconds with %d threads\n", 
-           (end_time - start_time), num_threads);
-
+    // Free dynamically allocated memory
     for (int i = 0; i < V; i++)
         free(graph[i]);
     free(graph);
 
     return 0;
 }
+
+
+
